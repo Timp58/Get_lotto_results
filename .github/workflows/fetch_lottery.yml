@@ -1,4 +1,26 @@
-- name: Download and format National Lottery CSV
+name: Fetch National Lottery CSV Results
+
+on:
+  # Schedule: Lotto draws are Wednesday and Saturday nights.
+  # Run Thursdays and Sundays at 04:00 UTC (cron syntax: min hour day month day-of-week)
+  schedule:
+    - cron: '0 4 * * 0,4'
+  
+  # Allows you to trigger the workflow manually from the GitHub UI for testing
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  download-and-commit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download National Lottery CSV
         run: |
           # 1. Download raw content
           curl -sSfL \
@@ -14,3 +36,18 @@
           }' raw_lotto.csv > lotto_results.csv
 
           rm raw_lotto.csv
+
+      - name: Commit and push changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add lotto_results.csv
+          
+          # Only commit if the downloaded file has actually changed
+          if git diff --staged --quiet; then
+            echo "No new results found. Nothing to commit."
+          else
+            git commit -m "chore: update National Lottery results $(date -u +'%Y-%m-%d')"
+            git push
+          fi
