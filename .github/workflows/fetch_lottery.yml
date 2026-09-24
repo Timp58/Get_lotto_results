@@ -1,47 +1,16 @@
-name: Fetch National Lottery CSV Results
-
-on:
-  # Schedule: Lotto draws are Wednesday and Saturday nights.
-  # Run Thursdays and Sundays at 04:00 UTC (cron syntax: min hour day month day-of-week)
-  schedule:
-    - cron: '0 4 * * 0,4'
-  
-  # Allows you to trigger the workflow manually from the GitHub UI for testing
-  workflow_dispatch:
-
-permissions:
-  contents: write
-
-jobs:
-  download-and-commit:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download National Lottery CSV
+- name: Download and format National Lottery CSV
         run: |
-          # Fetch the official 180-day Lotto draw history CSV
-          # -s: silent, -S: show error, -f: fail on HTTP errors, -L: follow redirects
-          # Pass standard browser User-Agent headers to ensure the CDN accepts the request
+          # 1. Download raw content
           curl -sSfL \
             -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" \
-            -H "Accept: text/csv,application/csv,text/plain" \
             "https://www.national-lottery.co.uk/results/lotto/draw-history/csv" \
-            -o lotto_results.csv
+            -o raw_lotto.csv
 
-      - name: Commit and push changes
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          
-          git add lotto_results.csv
-          
-          # Only commit if the downloaded file has actually changed
-          if git diff --staged --quiet; then
-            echo "No new results found. Nothing to commit."
-          else
-            git commit -m "chore: update National Lottery results $(date -u +'%Y-%m-%d')"
-            git push
-          fi
+          # 2. Re-insert newline after every 10th comma-separated field
+          awk -F',' -v OFS=',' '{
+            for (i = 1; i <= NF; i++) {
+              printf "%s%s", $i, (i % 10 == 0 || i == NF ? "\n" : OFS)
+            }
+          }' raw_lotto.csv > lotto_results.csv
+
+          rm raw_lotto.csv
