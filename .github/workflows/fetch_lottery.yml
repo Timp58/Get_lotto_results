@@ -20,30 +20,49 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Download National Lottery CSV
+      - name: Download Lotto XML and convert to CSV
         run: |
-          curl -v -L \
-            -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" \
-            -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,text/csv,*/*;q=0.8" \
-            -H "Accept-Language: en-GB,en;q=0.9" \
-            -H "Referer: https://www.national-lottery.co.uk/results/lotto/draw-history" \
-            -H "Sec-Fetch-Dest: document" \
-            -H "Sec-Fetch-Mode: navigate" \
-            -H "Sec-Fetch-Site: same-origin" \
-            -H "Upgrade-Insecure-Requests: 1" \
-            "https://www.national-lottery.co.uk/results/lotto/draw-history/csv" \
-            -o raw_lotto.csv.csv
-           ls -la raw_lotto.csv    
+          # 1. Download the redirected XML file directly to raw_lotto.xml
+          curl -sSL "https://www.national-lottery.co.uk/results/lotto/draw-history/xml" \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" \
+            -o raw_lotto.xml
 
-          # 2. Re-insert newline after every 10th comma-separated field
-          awk -F',' -v OFS=',' '{
-            for (i = 1; i <= NF; i++) {
-              printf "%s%s", $i, (i % 10 == 0 || i == NF ? "\n" : OFS)
-            }
-          }' raw_lotto.csv > lotto_results.csv
+          # 2. Parse XML into raw_lotto.csv using standard Python libraries
+          python3 - << 'EOF'
+          import csv
+          import xml.etree.ElementTree as ET
 
-          rm raw_lotto.csv
+          tree = ET.parse("raw_lotto.xml")
+          root = tree.getroot()
 
+          # Find repeat draw nodes or fallback to all direct child elements
+          draws = root.findall(".//draw")
+          if not draws:
+              # Fallback if the XML uses a different tag structure
+              draws = [child for child in root if len(child) > 0]
+
+          if draws:
+              # Collect all unique field tags across items while preserving order
+              fieldnames = []
+              for draw in draws:
+                  for child in draw:
+                      if child.tag not in fieldnames:
+                          fieldnames.append(child.tag)
+
+              with open("raw_lotto.csv", "w", newline="", encoding="utf-8") as f:
+                  writer = csv.DictWriter(f, fieldnames=fieldnames)
+                  writer.writeheader()
+                  for draw in draws:
+                      row = {child.tag: (child.text or "").strip() for child in draw}
+                      writer.writerow(row)
+              print("Successfully generated raw_lotto.csv")
+          else:
+              print("Warning: No draw elements found in raw_lotto.xml")
+          EOF
+
+          # Verify file exists for subsequent steps
+          ls -lh raw_lotto.csv
+        
       - name: Commit and push changes
         run: |
           git config --global user.name "github-actions[bot]"
