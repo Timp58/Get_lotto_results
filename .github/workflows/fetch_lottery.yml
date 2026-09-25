@@ -32,7 +32,7 @@ jobs:
             -H "Sec-Fetch-Site: same-origin" \
             -H "Upgrade-Insecure-Requests: 1" \
             "https://www.national-lottery.co.uk/results/lotto/draw-history/csv" \
-            -o lotto_results.csv
+            -o raw_lotto.csv.csv
 
           # 2. Re-insert newline after every 10th comma-separated field
           awk -F',' -v OFS=',' '{
