@@ -22,12 +22,17 @@ jobs:
 
       - name: Download Lotto XML and convert to CSV
         run: |
-          # 1. Download the redirected XML file directly to raw_lotto.xml
+          # 1. Download
           curl -sSL "https://www.national-lottery.co.uk/results/lotto/draw-history/xml" \
             -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" \
             -o raw_lotto.xml
 
-          # 2. Parse XML into raw_lotto.csv using standard Python libraries
+          # 2. Inspect raw downloaded content in logs
+          echo "=== First 20 lines of raw_lotto.xml ==="
+          head -n 20 raw_lotto.xml
+          echo "========================================"
+
+          # 3. Flexible converter
           python3 - << 'EOF'
           import csv
           import xml.etree.ElementTree as ET
@@ -35,33 +40,55 @@ jobs:
           tree = ET.parse("raw_lotto.xml")
           root = tree.getroot()
 
-          # Find repeat draw nodes or fallback to all direct child elements
-          draws = root.findall(".//draw")
-          if not draws:
-              # Fallback if the XML uses a different tag structure
-              draws = [child for child in root if len(child) > 0]
+          # Strip XML namespaces if present
+          for elem in root.iter():
+              if "}" in elem.tag:
+                  elem.tag = elem.tag.split("}", 1)[1]
 
-          if draws:
-              # Collect all unique field tags across items while preserving order
-              fieldnames = []
-              for draw in draws:
-                  for child in draw:
-                      if child.tag not in fieldnames:
-                          fieldnames.append(child.tag)
+          # Find all leaf elements or record containers
+          # Check common container names, otherwise take direct children of root
+          records = []
+          for child in list(root):
+              row_data = {}
+              # If child has nested elements (e.g., <draw><date>...</date></draw>)
+              if len(child) > 0:
+                  for sub in child:
+                      row_data[sub.tag] = (sub.text or "").strip()
+              # If attributes are used instead (e.g., <draw date="..." ball1="..." />)
+              if child.attrib:
+                  row_data.update(child.attrib)
+              
+              if row_data:
+                  records.append(row_data)
+
+          if not records:
+              # Fallback: search recursively for any elements with children
+              for node in root.iter():
+                  if len(node) > 0 and node != root:
+                      row_data = {sub.tag: (sub.text or "").strip() for sub in node}
+                      if row_data:
+                          records.append(row_data)
+
+          if records:
+              # Collect all keys preserving appearance order
+              keys = []
+              for r in records:
+                  for k in r.keys():
+                      if k not in keys:
+                          keys.append(k)
 
               with open("raw_lotto.csv", "w", newline="", encoding="utf-8") as f:
-                  writer = csv.DictWriter(f, fieldnames=fieldnames)
+                  writer = csv.DictWriter(f, fieldnames=keys)
                   writer.writeheader()
-                  for draw in draws:
-                      row = {child.tag: (child.text or "").strip() for child in draw}
-                      writer.writerow(row)
-              print("Successfully generated raw_lotto.csv")
+                  writer.writerows(records)
+              print(f"Generated raw_lotto.csv with {len(records)} rows.")
           else:
-              print("Warning: No draw elements found in raw_lotto.xml")
+              print("No records could be parsed from XML.")
           EOF
 
-          # Verify file exists for subsequent steps
+          # Verify output
           ls -lh raw_lotto.csv
+          cat raw_lotto.csv
         
       - name: Commit and push changes
         run: |
