@@ -22,7 +22,7 @@ jobs:
 
       - name: Download National Lottery CSV
         run: |
-          curl -sSfL \
+          curl -v -L \
             -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" \
             -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,text/csv,*/*;q=0.8" \
             -H "Accept-Language: en-GB,en;q=0.9" \
@@ -33,6 +33,8 @@ jobs:
             -H "Upgrade-Insecure-Requests: 1" \
             "https://www.national-lottery.co.uk/results/lotto/draw-history/csv" \
             -o raw_lotto.csv.csv
+
+        ls -la raw_lotto.csv    
 
           # 2. Re-insert newline after every 10th comma-separated field
           awk -F',' -v OFS=',' '{
