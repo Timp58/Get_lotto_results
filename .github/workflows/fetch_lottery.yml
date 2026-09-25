@@ -22,17 +22,10 @@ jobs:
 
       - name: Download Lotto XML and convert to CSV
         run: |
-          # 1. Download
           curl -sSL "https://www.national-lottery.co.uk/results/lotto/draw-history/xml" \
             -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" \
             -o raw_lotto.xml
 
-          # 2. Inspect raw downloaded content in logs
-          echo "=== First 20 lines of raw_lotto.xml ==="
-          head -n 20 raw_lotto.xml
-          echo "========================================"
-
-          # 3. Flexible converter
           python3 - << 'EOF'
           import csv
           import xml.etree.ElementTree as ET
@@ -40,54 +33,78 @@ jobs:
           tree = ET.parse("raw_lotto.xml")
           root = tree.getroot()
 
-          # Strip XML namespaces if present
-          for elem in root.iter():
-              if "}" in elem.tag:
-                  elem.tag = elem.tag.split("}", 1)[1]
+          # Column headers matching historical Lotto formats
+          fieldnames = [
+              "DrawNumber",
+              "DrawDate",
+              "Ball 1",
+              "Ball 2",
+              "Ball 3",
+              "Ball 4",
+              "Ball 5",
+              "Ball 6",
+              "Bonus Ball",
+              "Ball Set",
+              "Draw Machine",
+              "Rollover",
+              "Rollover Count",
+              "Next Estimated Jackpot"
+          ]
 
-          # Find all leaf elements or record containers
-          # Check common container names, otherwise take direct children of root
-          records = []
-          for child in list(root):
-              row_data = {}
-              # If child has nested elements (e.g., <draw><date>...</date></draw>)
-              if len(child) > 0:
-                  for sub in child:
-                      row_data[sub.tag] = (sub.text or "").strip()
-              # If attributes are used instead (e.g., <draw date="..." ball1="..." />)
-              if child.attrib:
-                  row_data.update(child.attrib)
+          rows = []
+
+          for game in root.findall(".//game"):
+              draw_elem = game.find("draw")
+              draw_num = draw_elem.findtext("draw-number", default="") if draw_elem is not None else ""
+              draw_date = draw_elem.findtext("draw-date", default="") if draw_elem is not None else ""
               
-              if row_data:
-                  records.append(row_data)
+              # First machine entry is typically the primary Lotto draw machine
+              machines = [m.text for m in draw_elem.findall("draw-machine") if m.text] if draw_elem is not None else []
+              machine = machines[0] if machines else ""
 
-          if not records:
-              # Fallback: search recursively for any elements with children
-              for node in root.iter():
-                  if len(node) > 0 and node != root:
-                      row_data = {sub.tag: (sub.text or "").strip() for sub in node}
-                      if row_data:
-                          records.append(row_data)
+              rollover = game.findtext("rollover", default="")
+              rollover_count = game.findtext("rollover-count", default="")
+              jackpot = game.findtext("next-estimated-jackpot", default="")
 
-          if records:
-              # Collect all keys preserving appearance order
-              keys = []
-              for r in records:
-                  for k in r.keys():
-                      if k not in keys:
-                          keys.append(k)
+              # Each <balls> node is a draw set (e.g., Main Lotto vs Extra)
+              for balls_elem in game.findall("balls"):
+                  ball_set = balls_elem.findtext("set", default="")
+                  
+                  # Extract balls ordered by the 'number' attribute
+                  balls = {}
+                  for b in balls_elem.findall("ball"):
+                      idx = b.attrib.get("number")
+                      if idx:
+                          balls[f"Ball {idx}"] = b.text.strip() if b.text else ""
 
-              with open("raw_lotto.csv", "w", newline="", encoding="utf-8") as f:
-                  writer = csv.DictWriter(f, fieldnames=keys)
-                  writer.writeheader()
-                  writer.writerows(records)
-              print(f"Generated raw_lotto.csv with {len(records)} rows.")
-          else:
-              print("No records could be parsed from XML.")
+                  bonus = balls_elem.findtext("bonus-ball", default="")
+
+                  row = {
+                      "DrawNumber": draw_num,
+                      "DrawDate": draw_date,
+                      "Ball 1": balls.get("Ball 1", ""),
+                      "Ball 2": balls.get("Ball 2", ""),
+                      "Ball 3": balls.get("Ball 3", ""),
+                      "Ball 4": balls.get("Ball 4", ""),
+                      "Ball 5": balls.get("Ball 5", ""),
+                      "Ball 6": balls.get("Ball 6", ""),
+                      "Bonus Ball": bonus,
+                      "Ball Set": ball_set,
+                      "Draw Machine": machine,
+                      "Rollover": rollover,
+                      "Rollover Count": rollover_count,
+                      "Next Estimated Jackpot": jackpot
+                  }
+                  rows.append(row)
+
+          with open("raw_lotto.csv", "w", newline="", encoding="utf-8") as f:
+              writer = csv.DictWriter(f, fieldnames=fieldnames)
+              writer.writeheader()
+              writer.writerows(rows)
+
+          print(f"Parsed {len(rows)} record(s) into raw_lotto.csv")
           EOF
 
-          # Verify output
-          ls -lh raw_lotto.csv
           cat raw_lotto.csv
         
       - name: Commit and push changes
