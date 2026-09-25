@@ -1,23 +1,19 @@
-name: Fetch National Lottery CSV Results
+name: Update Lotto CSV
 
 on:
-  # Schedule: Lotto draws are Wednesday and Saturday nights.
-  # Run Thursdays and Sundays at 04:00 UTC (cron syntax: min hour day month day-of-week)
   schedule:
-    - cron: '0 4 * * 0,4'
-  
-  # Allows you to trigger the workflow manually from the GitHub UI for testing
-  workflow_dispatch:
+    # Runs every Saturday at 21:30 UTC (day 6 of the week)
+    - cron: '30 21 * * 6'
+  workflow_dispatch: # Allows manual trigger anytime from the GitHub Actions tab
 
 permissions:
   contents: write
 
 jobs:
-  download-and-commit:
+  update-lotto:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Check out repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Download Lotto XML and convert to CSV
@@ -33,32 +29,18 @@ jobs:
           tree = ET.parse("raw_lotto.xml")
           root = tree.getroot()
 
-          # Column headers matching historical Lotto formats
           fieldnames = [
-              "DrawNumber",
-              "DrawDate",
-              "Ball 1",
-              "Ball 2",
-              "Ball 3",
-              "Ball 4",
-              "Ball 5",
-              "Ball 6",
-              "Bonus Ball",
-              "Ball Set",
-              "Draw Machine",
-              "Rollover",
-              "Rollover Count",
-              "Next Estimated Jackpot"
+              "DrawNumber", "DrawDate", "Ball 1", "Ball 2", "Ball 3",
+              "Ball 4", "Ball 5", "Ball 6", "Bonus Ball", "Ball Set",
+              "Draw Machine", "Rollover", "Rollover Count", "Next Estimated Jackpot"
           ]
 
           rows = []
-
           for game in root.findall(".//game"):
               draw_elem = game.find("draw")
               draw_num = draw_elem.findtext("draw-number", default="") if draw_elem is not None else ""
               draw_date = draw_elem.findtext("draw-date", default="") if draw_elem is not None else ""
-              
-              # First machine entry is typically the primary Lotto draw machine
+
               machines = [m.text for m in draw_elem.findall("draw-machine") if m.text] if draw_elem is not None else []
               machine = machines[0] if machines else ""
 
@@ -66,11 +48,8 @@ jobs:
               rollover_count = game.findtext("rollover-count", default="")
               jackpot = game.findtext("next-estimated-jackpot", default="")
 
-              # Each <balls> node is a draw set (e.g., Main Lotto vs Extra)
               for balls_elem in game.findall("balls"):
                   ball_set = balls_elem.findtext("set", default="")
-                  
-                  # Extract balls ordered by the 'number' attribute
                   balls = {}
                   for b in balls_elem.findall("ball"):
                       idx = b.attrib.get("number")
@@ -78,8 +57,7 @@ jobs:
                           balls[f"Ball {idx}"] = b.text.strip() if b.text else ""
 
                   bonus = balls_elem.findtext("bonus-ball", default="")
-
-                  row = {
+                  rows.append({
                       "DrawNumber": draw_num,
                       "DrawDate": draw_date,
                       "Ball 1": balls.get("Ball 1", ""),
@@ -94,30 +72,25 @@ jobs:
                       "Rollover": rollover,
                       "Rollover Count": rollover_count,
                       "Next Estimated Jackpot": jackpot
-                  }
-                  rows.append(row)
+                  })
 
-          with open("raw_lotto.csv", "w", newline="", encoding="utf-8") as f:
+          with open("latest_lottery_draw.csv", "w", newline="", encoding="utf-8") as f:
               writer = csv.DictWriter(f, fieldnames=fieldnames)
               writer.writeheader()
               writer.writerows(rows)
-
-          print(f"Parsed {len(rows)} record(s) into raw_lotto.csv")
           EOF
 
-          cat raw_lotto.csv
-        
+          # Clean up the temporary XML file
+          rm -f raw_lotto.xml
+
       - name: Commit and push changes
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          
-          git add lotto_results.csv
-          
-          # Only commit if the downloaded file has actually changed
+          git add latest_lottery_draw.csv
           if git diff --staged --quiet; then
-            echo "No new results found. Nothing to commit."
+            echo "No changes to latest_lottery_draw.csv detected."
           else
-            git commit -m "chore: update National Lottery results $(date -u +'%Y-%m-%d')"
+            git commit -m "chore: update latest_lottery_draw.csv [skip ci]"
             git push
           fi
